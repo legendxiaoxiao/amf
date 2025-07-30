@@ -11,6 +11,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/free5gc/amf/internal/logger"
+	_ "github.com/free5gc/amf/internal/observer"
 	"github.com/free5gc/amf/pkg/factory"
 	"github.com/free5gc/amf/pkg/service"
 	logger_util "github.com/free5gc/util/logger"

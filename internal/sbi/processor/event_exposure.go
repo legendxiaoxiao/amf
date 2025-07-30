@@ -425,7 +425,8 @@ func (p *Processor) newAmfEventReport(ue *context.AmfUe, amfEventType models.Amf
 			}
 			rmInfos = append(rmInfos, rmInfo)
 		}
-		report.RmInfoList = rmInfos
+		report.RmInfoList = rmInfos 
+		report.Location = &ue.Location
 	case models.AmfEventType_CONNECTIVITY_STATE_REPORT:
 		report.CmInfoList = ue.GetCmInfo()
 	case models.AmfEventType_REACHABILITY_REPORT:
