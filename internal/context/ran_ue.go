@@ -1,8 +1,11 @@
 package context
 
 import (
+	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/mohae/deepcopy"
@@ -187,11 +190,17 @@ func (ranUe *RanUe) UpdateLocation(userLocationInformation *ngapType.UserLocatio
 				locationInfoEUTRA.TimeStamp.Value)
 		}
 		if ranUe.AmfUe != nil {
-			if ranUe.AmfUe.Tai != ranUe.Tai {
+			locationChanged := ranUe.AmfUe.Tai != ranUe.Tai
+			if locationChanged {
 				ranUe.AmfUe.LocationChanged = true
 			}
 			ranUe.AmfUe.Location = deepcopy.Copy(ranUe.Location).(models.UserLocation)
 			ranUe.AmfUe.Tai = deepcopy.Copy(*ranUe.AmfUe.Location.EutraLocation.Tai).(models.Tai)
+
+			// 触发位置变化事件
+			if locationChanged {
+				triggerLocationChangeEvent(ranUe.AmfUe)
+			}
 		}
 	case ngapType.UserLocationInformationPresentUserLocationInformationNR:
 		locationInfoNR := userLocationInformation.UserLocationInformationNR
@@ -224,11 +233,17 @@ func (ranUe *RanUe) UpdateLocation(userLocationInformation *ngapType.UserLocatio
 			ranUe.Location.NrLocation.AgeOfLocationInformation = ngapConvert.TimeStampToInt32(locationInfoNR.TimeStamp.Value)
 		}
 		if ranUe.AmfUe != nil {
-			if ranUe.AmfUe.Tai != ranUe.Tai {
+			locationChanged := ranUe.AmfUe.Tai != ranUe.Tai
+			if locationChanged {
 				ranUe.AmfUe.LocationChanged = true
 			}
 			ranUe.AmfUe.Location = deepcopy.Copy(ranUe.Location).(models.UserLocation)
 			ranUe.AmfUe.Tai = deepcopy.Copy(*ranUe.AmfUe.Location.NrLocation.Tai).(models.Tai)
+
+			// 触发位置变化事件
+			if locationChanged {
+				triggerLocationChangeEvent(ranUe.AmfUe)
+			}
 		}
 	case ngapType.UserLocationInformationPresentUserLocationInformationN3IWF:
 		locationInfoN3IWF := userLocationInformation.UserLocationInformationN3IWF
@@ -321,5 +336,91 @@ func (ranUe *RanUe) UpdateLocation(userLocationInformation *ngapType.UserLocatio
 		}
 
 	case ngapType.UserLocationInformationPresentNothing:
+	}
+}
+
+// triggerLocationChangeEvent 触发位置变化事件
+func triggerLocationChangeEvent(ue *AmfUe) {
+	amfSelf := GetSelf()
+
+	// 遍历所有事件订阅
+	amfSelf.EventSubscriptions.Range(func(key, value interface{}) bool {
+		sub := value.(*AMFContextEventSubscription)
+
+		// 检查是否为LOCATION_REPORT事件
+		for _, event := range sub.EventSubscription.EventList {
+			if event.Type == models.AmfEventType_LOCATION_REPORT {
+				// 检查UE是否匹配订阅条件
+				if shouldReportForUE(ue, sub) {
+					// 生成标准的事件报告
+					report := generateStandardLocationReport(ue, key.(string))
+					// 异步发送到订阅者
+					go sendEventReport(sub.EventSubscription.EventNotifyUri, report)
+				}
+			}
+		}
+		return true
+	})
+}
+
+// shouldReportForUE 检查UE是否应该报告给订阅者
+func shouldReportForUE(ue *AmfUe, sub *AMFContextEventSubscription) bool {
+	if sub.IsAnyUe {
+		return true
+	}
+
+	for _, supi := range sub.UeSupiList {
+		if supi == ue.Supi {
+			return true
+		}
+	}
+
+	return false
+}
+
+// generateStandardLocationReport 生成标准的位置报告
+func generateStandardLocationReport(ue *AmfUe, subscriptionId string) models.AmfEventReport {
+	timestamp := time.Now().UTC()
+	return models.AmfEventReport{
+		Type:      models.AmfEventType_LOCATION_REPORT,
+		Supi:      ue.Supi,
+		TimeStamp: &timestamp,
+		State: &models.AmfEventState{
+			Active: true,
+		},
+		Location: &ue.Location,
+	}
+}
+
+// sendEventReport 发送事件报告到订阅者
+func sendEventReport(uri string, report models.AmfEventReport) {
+	// 构造事件报告请求
+	eventReport := models.AmfEventReport{
+		Type:      report.Type,
+		Supi:      report.Supi,
+		TimeStamp: report.TimeStamp,
+		State:     report.State,
+		Location:  report.Location,
+	}
+
+	// 序列化为JSON
+	data, err := json.Marshal(eventReport)
+	if err != nil {
+		logger.CtxLog.Errorf("Failed to marshal event report: %v", err)
+		return
+	}
+
+	// 发送HTTP POST请求
+	resp, err := http.Post(uri, "application/json", bytes.NewReader(data))
+	if err != nil {
+		logger.CtxLog.Errorf("Failed to send event report to %s: %v", uri, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		logger.CtxLog.Infof("Successfully sent location report to %s for UE %s", uri, report.Supi)
+	} else {
+		logger.CtxLog.Errorf("Failed to send event report to %s, status: %s", uri, resp.Status)
 	}
 }

@@ -175,6 +175,18 @@ func (p *Processor) CreateAMFEventSubscriptionProcedure(createEventSubscription 
 					}
 				}
 			}
+
+			// 新增：如果订阅了位置报告，立即检查位置变化
+			for _, event := range subscription.EventList {
+				if event.Type == models.AmfEventType_LOCATION_REPORT && ue.LocationChanged {
+					// 立即发送位置报告
+					report, ok := p.newAmfEventReport(ue, models.AmfEventType_LOCATION_REPORT, newSubscriptionID)
+					if ok {
+						reportlist = append(reportlist, report)
+					}
+				}
+			}
+
 			// delete subscription
 			if reportlistLen := len(reportlist); reportlistLen > 0 && (!reportlist[reportlistLen-1].State.Active) {
 				delete(ue.EventSubscriptionsInfo, newSubscriptionID)
@@ -199,6 +211,18 @@ func (p *Processor) CreateAMFEventSubscriptionProcedure(createEventSubscription 
 						}
 					}
 				}
+
+				// 新增：如果订阅了位置报告，立即检查位置变化
+				for _, event := range subscription.EventList {
+					if event.Type == models.AmfEventType_LOCATION_REPORT && ue.LocationChanged {
+						// 立即发送位置报告
+						report, ok := p.newAmfEventReport(ue, models.AmfEventType_LOCATION_REPORT, newSubscriptionID)
+						if ok {
+							reportlist = append(reportlist, report)
+						}
+					}
+				}
+
 				// delete subscription
 				if reportlistLen := len(reportlist); reportlistLen > 0 && (!reportlist[reportlistLen-1].State.Active) {
 					delete(ue.EventSubscriptionsInfo, newSubscriptionID)
@@ -222,6 +246,18 @@ func (p *Processor) CreateAMFEventSubscriptionProcedure(createEventSubscription 
 				}
 			}
 		}
+
+		// 新增：如果订阅了位置报告，立即检查位置变化
+		for _, event := range subscription.EventList {
+			if event.Type == models.AmfEventType_LOCATION_REPORT && ue.LocationChanged {
+				// 立即发送位置报告
+				report, ok := p.newAmfEventReport(ue, models.AmfEventType_LOCATION_REPORT, newSubscriptionID)
+				if ok {
+					reportlist = append(reportlist, report)
+				}
+			}
+		}
+
 		// delete subscription
 		if reportlistLen := len(reportlist); reportlistLen > 0 && (!reportlist[reportlistLen-1].State.Active) {
 			delete(ue.EventSubscriptionsInfo, newSubscriptionID)
@@ -402,7 +438,14 @@ func (p *Processor) newAmfEventReport(ue *context.AmfUe, amfEventType models.Amf
 
 	switch amfEventType {
 	case models.AmfEventType_LOCATION_REPORT:
-		report.Location = &ue.Location
+		// 只有在位置发生变化时才报告
+		if ue.LocationChanged {
+			report.Location = &ue.Location
+			ue.LocationChanged = false // 重置标志
+			ok = true
+		} else {
+			ok = false // 位置没有变化，不生成报告
+		}
 	// case models.AmfEventType_PRESENCE_IN_AOI_REPORT:
 	// report.AreaList = (*subscription.EventList)[eventIndex].AreaList
 	case models.AmfEventType_TIMEZONE_REPORT:
@@ -425,7 +468,7 @@ func (p *Processor) newAmfEventReport(ue *context.AmfUe, amfEventType models.Amf
 			}
 			rmInfos = append(rmInfos, rmInfo)
 		}
-		report.RmInfoList = rmInfos 
+		report.RmInfoList = rmInfos
 		report.Location = &ue.Location
 	case models.AmfEventType_CONNECTIVITY_STATE_REPORT:
 		report.CmInfoList = ue.GetCmInfo()
